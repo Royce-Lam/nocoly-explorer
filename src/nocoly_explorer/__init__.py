@@ -6,10 +6,10 @@ from .filters import NocolyFilter
 __all__ = ["WorksheetExporter", "NocolyFilter", "StreamingExporter",
            "ParquetExportOptions", "PartitionSpec",
            "StreamingExportConfig", "ExportResult",
-           "SchemaDriftError", "CardinalityExceededError"]
+           "SchemaDriftError", "CardinalityExceededError",
+           "AsyncWorksheetClient", "AsyncClientError", "PaginationLimitExceeded"]
 
-# Lazy re-exports: keep pyarrow optional. If a user only needs the v0.1.1 API,
-# importing nocoly_explorer must not pull in pyarrow.
+# Lazy re-exports: keep pyarrow and aiohttp optional.
 _STREAMING_EXPORTS = {
     "StreamingExporter",
     "ParquetExportOptions",
@@ -17,7 +17,17 @@ _STREAMING_EXPORTS = {
     "StreamingExportConfig",
     "ExportResult",
 }
-_ERROR_EXPORTS = {"SchemaDriftError", "CardinalityExceededError"}
+_ERROR_EXPORTS = {
+    "SchemaDriftError",
+    "CardinalityExceededError",
+    "AsyncClientError",
+    "PaginationLimitExceeded",
+}
+_ASYNC_EXPORTS = {
+    "AsyncWorksheetClient",
+    "AsyncClientError",
+    "PaginationLimitExceeded",
+}
 
 
 def __getattr__(name):
@@ -38,7 +48,27 @@ def __getattr__(name):
         }
         return namespace[name]
     if name in _ERROR_EXPORTS:
-        from .exceptions import SchemaDriftError, CardinalityExceededError
-        return {"SchemaDriftError": SchemaDriftError,
-                "CardinalityExceededError": CardinalityExceededError}[name]
+        from .exceptions import (
+            SchemaDriftError,
+            CardinalityExceededError,
+            AsyncClientError,
+            PaginationLimitExceeded,
+        )
+        return {
+            "SchemaDriftError": SchemaDriftError,
+            "CardinalityExceededError": CardinalityExceededError,
+            "AsyncClientError": AsyncClientError,
+            "PaginationLimitExceeded": PaginationLimitExceeded,
+        }[name]
+    if name in _ASYNC_EXPORTS:
+        from .async_client import (
+            AsyncWorksheetClient,
+            AsyncClientError,
+            PaginationLimitExceeded,
+        )
+        return {
+            "AsyncWorksheetClient": AsyncWorksheetClient,
+            "AsyncClientError": AsyncClientError,
+            "PaginationLimitExceeded": PaginationLimitExceeded,
+        }[name]
     raise AttributeError(f"module 'nocoly_explorer' has no attribute {name!r}")
