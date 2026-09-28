@@ -1,12 +1,41 @@
 # Nocoly Explorer
 
-A modular Python client for downloading [Nocoly](https://www.nocoly.com) worksheet
-data into pandas / PySpark / CSV / JSON / file artifacts. Designed for both
-local scripts and Databricks runtimes, with pluggable credential resolution,
-a validated filter DSL, and configurable retry / pagination behavior.
+A modular Python client for downloading [Nocoly](https://www.nocoly.com) worksheet data,
+from one-shot scripts to enterprise data pipelines. Three layers stacked on the same
+core client:
 
-[![Tests](https://img.shields.io/badge/tests-56%20passed-brightgreen)]()
+- **`WorksheetExporter`** — fetch into pandas / PySpark / CSV / JSON / files (v0.1.1)
+- **`StreamingExporter` + `AsyncWorksheetClient`** — paginate concurrently, write
+  partitioned Parquet, hold memory bounded by row-group size (v0.2.0)
+- **`create_app` + `run_job`** — FastAPI service + Arq worker for orchestration
+  from n8n / Airflow / schedulers (v0.2.0)
+
+[![Tests](https://img.shields.io/badge/tests-173%20passed-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)]()
+[![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/rollroyces/nocoly-explorer/releases/tag/v0.2.0)
+
+---
+
+## Demo
+
+![nocoly-explorer v0.2.0 demo](docs/assets/demo.gif)
+
+The demo runs against a **local mock Nocoly server**, not your real production
+endpoint — that's intentional. It exercises the wiring of the three layers
+end-to-end: imports, FastAPI service start, mock data source, job submission,
+status polling, result endpoint, cancellation, and 404 handling. Run it yourself:
+
+```bash
+git clone https://github.com/rollroyces/nocoly-explorer.git
+cd nocoly-explorer
+pip install -e ".[service,streaming,async,test]"
+./scripts/demo.py
+```
+
+The cast file at `docs/assets/demo.cast` and the driver at `scripts/demo.py` are
+checked in so the demo is reproducible.
+
+---
 
 ## Installation
 
@@ -14,262 +43,403 @@ a validated filter DSL, and configurable retry / pagination behavior.
 pip install nocoly-explorer
 ```
 
-For pandas output, install with the optional `dataframe` extra:
+Pick extras based on what you need:
+
+| Extra            | Adds                                                | When you need it                                       |
+|------------------|-----------------------------------------------------|--------------------------------------------------------|
+| `dataframe`      | `pandas>=2.0`                                       | `WorksheetExporter(..., output_type="dataframe")`      |
+| `spark`          | `pyspark>=3.4`                                      | Databricks / PySpark output                            |
+| `streaming`      | `pyarrow>=14`                                       | `StreamingExporter` (Parquet)                          |
+| `async`          | `aiohttp>=3.9`                                      | `AsyncWorksheetClient` (concurrent pagination)         |
+| `service`        | `fastapi`, `arq`, `uvicorn`, `httpx`                | `create_app`, `run_job` (service layer)                |
+| `test`           | `fakeredis`, `pytest-asyncio`                       | running the test suite                                 |
 
 ```bash
-pip install "nocoly-explorer[dataframe]"
+pip install "nocoly-explorer[streaming,async]"          # export jobs
+pip install "nocoly-explorer[service,streaming,async]"  # full pipeline + API
 ```
 
-For PySpark output (typically inside Databricks):
+---
 
-```bash
-pip install "nocoly-explorer[spark]"
-```
+## Layer 1 — `WorksheetExporter` (v0.1.1)
 
-## Quickstart
+The original use case: fetch a worksheet into a DataFrame (or Spark / CSV / JSON /
+file), with pluggable credentials, validated filters, capped retries, and `Retry-After`
+honored on 429/503.
 
 ```python
 from nocoly_explorer import WorksheetExporter, NocolyFilter
-import logging
 
-logger = logging.getLogger("nocoly_export")
-
-# Build a filter expression with the helper DSL.
-filter_expression = NocolyFilter.and_group([
-    NocolyFilter.quick(Status="Active", _updatedAt__gt="2025-01-01"),
-    NocolyFilter.or_group([
-        NocolyFilter.quick(Region="HK"),
-        NocolyFilter.quick(Region="SZ"),
-    ]),
-])
-
-# Fetch into a pandas DataFrame.
 df = WorksheetExporter().export(
     host="https://bpm-uat.chinachemgroup.com",
     worksheet_id="ws_123",
-    filter_criteria=filter_expression,
+    filter_criteria=NocolyFilter.and_group([
+        NocolyFilter.quick(Status="Active", _updatedAt__gt="2025-01-01"),
+        NocolyFilter.or_group([
+            NocolyFilter.quick(Region="HK"),
+            NocolyFilter.quick(Region="SZ"),
+        ]),
+    ]),
     columns=["Name", "Region", "Status", "_updatedAt"],
     sorts=[{"field": "_updatedAt", "order": "DESC"}],
     page_size=500,
     max_pages=25,
-    logger=logger,
 )
 ```
 
-## Architecture Overview
+### Output formats
 
-The package follows a ports-and-adapters separation of concerns:
+| `output_type`     | Returns                          | Notes                                                  |
+|-------------------|----------------------------------|--------------------------------------------------------|
+| `dataframe`       | `pandas.DataFrame`               | Requires pandas.                                       |
+| `spark`           | `pyspark.sql.DataFrame`          | Requires PySpark / Databricks.                         |
+| `json`            | `list[dict]`                     | Raw passthrough; serialize as needed.                  |
+| `string`          | JSON-formatted `str`             | Handles `datetime`, `Decimal`, `UUID`, `bytes`.        |
+| `csv`             | CSV-formatted `str`              | Union of all row keys; `None`/missing → empty.         |
+| `file`            | writes to disk                   | Atomic. Supports `json`, `csv`, `parquet`.            |
 
-- **Configuration & Environment Detection (`config.py`, `detector.py`)** — Reads user config files / env vars and determines whether the code runs on Databricks. This drives which adapters to instantiate.
-- **Credential Providers (`auth.py`)** — Strategy classes that encapsulate how `app_key` and `app_sign` are resolved (Databricks secrets vs. local env/config). The exporter never needs to know *where* secrets came from.
-- **API Client (`client.py`)** — Focused on calling the worksheet endpoints. Handles retries with capped exponential backoff, `Retry-After` honor, base URLs, and column/filter payload assembly.
-- **Output Layer (`output.py`)** — Knows how to shape raw row data into the requested format (DataFrame, CSV, JSON string, file write, etc.). Detects whether pandas / PySpark is available.
-- **Orchestrator (`exporter.py`)** — High-level façade (`WorksheetExporter`) that validates input, wires dependencies together, and returns the requested output type.
+### Architecture (Layer 1)
 
 ```
 WorksheetExporter
- ├── EnvironmentDetector
- ├── CredentialProvider (strategy)
- ├── WorksheetFetcher (client)
- └── OutputFormatter (adapter)
+ ├── EnvironmentDetector       (Databricks vs. local)
+ ├── CredentialProvider        (Databricks secrets vs. env vs. config)
+ ├── WorksheetFetcher          (retries, Retry-After, MAX_PAGE_SIZE=1000)
+ └── OutputFormatter           (dataframe / spark / json / csv / file)
 ```
 
-## Output Options
+---
 
-| `output_type`     | Returns                          | Notes                                  |
-|-------------------|----------------------------------|----------------------------------------|
-| `dataframe` (default) | `pandas.DataFrame`           | Requires pandas.                       |
-| `spark`           | `pyspark.sql.DataFrame`          | Requires PySpark / Databricks.         |
-| `json`            | `list[dict]`                     | Raw passthrough; serialize as needed.  |
-| `string`          | JSON-formatted `str`             | Handles `datetime`, `Decimal`, `UUID`, `bytes`. |
-| `csv`             | CSV-formatted `str`              | Union of all row keys; `None` and missing keys both render as empty. |
-| `file`            | writes to disk                   | Requires `file_path`. Supports `json`, `csv`, `parquet`. Atomic write (tmp + replace). |
+## Layer 2 — `StreamingExporter` + `AsyncWorksheetClient` (v0.2.0)
 
-`output_type="file"` writes atomically — a crash mid-export will not leave a
-half-written file at the target path. If `file_format` is provided and disagrees
-with the path extension, a warning is logged.
+For worksheets that don't fit in memory. Two pieces, composable:
 
-## Optional Parameters
-
-`WorksheetExporter.export()` exposes several knobs beyond the required `host`
-/ `worksheet_id` arguments:
-
-| Parameter      | Default        | Description                                              |
-|----------------|----------------|----------------------------------------------------------|
-| `filter_criteria`  | `None`     | dict or `NocolyFilter` expression (auto-wrapped).        |
-| `columns`          | `None`     | restricts the returned columns list.                     |
-| `sorts`            | `None`     | list of `{field, order}` dicts.                          |
-| `page_size`        | `200`      | Per-API-call page size; capped at 1000 (Nocoly v3 limit).|
-| `max_pages`        | `1000`     | Safety cap; raises if 0 or negative.                     |
-| `view_id`          | `""`       | Saved worksheet view identifier.                         |
-| `output_type`      | `"dataframe"` | One of `dataframe` / `spark` / `json` / `string` / `csv` / `file`. |
-| `file_path`        | `None`     | Required for `output_type="file"`.                        |
-| `file_format`      | `None`     | `json` / `csv` / `parquet` (inferred from extension if absent). |
-| `verify_ssl`       | `True`     | Set False to bypass TLS validation.                      |
-| `logger`           | `None`     | `logging.Logger` to receive structured debug/warnings.   |
-| `env_prefix`       | `None`     | Use `NOCOLY_<PREFIX>_APP_KEY` / `NOCOLY_<PREFIX>_APP_SIGN` for env-based credentials. |
-
-## Filter Builder Helpers
-
-- Import `NocolyFilter` from the top-level package to build validated payloads.
-- Compose conditions via `equals`, `greater_than`, `contains`, etc., and combine with `and_group` / `or_group`.
-- The depth check counts **group** levels only (max 3: root + 2 nested groups). Conditions attached to a group are part of that level.
-- `quick()` maps suffixes to operators (`Score__gt=40`, `Region__in=["HK","SZ"]`, `Status="Active"`).
-- A flat `{field: value}` dict is auto-wrapped as `{type: group, logic: AND, filters: [EQ condition]}`; pass either form to `filter_criteria=...`.
+### `AsyncWorksheetClient` — concurrent pagination
 
 ```python
-from nocoly_explorer import WorksheetExporter, NocolyFilter
+import os
+from nocoly_explorer import AsyncWorksheetClient
 
-# Three-level group nesting — root AND, nested OR, two leaf quick() groups.
-expr = NocolyFilter.and_group([
-    NocolyFilter.quick(Status="Active", _updatedAt__gt="2025-01-01"),
-    NocolyFilter.or_group([
-        NocolyFilter.quick(Region="HK"),
-        NocolyFilter.quick(Region="SZ"),
-    ]),
-])
-df = WorksheetExporter().export(
-    host="https://bpm-uat.chinachemgroup.com",
+client = AsyncWorksheetClient(
+    base_url="https://bpm-uat.chinachemgroup.com",
+    auth_token=f"{os.environ['NOCOLY_APP_KEY']}:{os.environ['NOCOLY_APP_SIGN']}",
     worksheet_id="ws_123",
-    filter_criteria=expr,
+    concurrency=8,                      # 8 in-flight pages max
+    requests_per_second=10.0,           # token bucket
+    max_page_size=1000,
+)
+
+rows = await client.fetch_all_async(
+    page_size=200,
+    max_pages=1000,        # hard safety limit
 )
 ```
 
-## Credential Resolution
+Properties:
+- **Order-preserving** — rows come back in page order even at concurrency=8.
+- **Token-bucket rate limited** — configurable `requests_per_second` + `burst`.
+- **Honors `Retry-After`** — parses both delta-seconds and HTTP-date forms, caps at
+  `max_wait_seconds`. Retries on 429/503; raises `AsyncClientError` on other 4xx.
+- **End-of-data signal** — server's `has_more` controls the loop. If `max_pages`
+  is hit without `has_more=False`, raises `PaginationLimitExceeded`.
 
-Three sources, in order:
+End-to-end smoke: 1,000 rows × 20 pages × 50 ms/page → **0.16 s** (6.2× faster
+than sequential).
 
-1. **Explicit kwargs** — pass `app_key=` and `app_sign=` directly.
-2. **Static config** — set `static_credentials.app_key` / `app_sign` in your config file.
-3. **Environment** — `NOCOLY_APP_KEY` / `NOCOLY_APP_SIGN`, or `NOCOLY_<PREFIX>_APP_KEY` / `NOCOLY_<PREFIX>_APP_SIGN` when `env_prefix="PROD"` is passed.
+### `StreamingExporter` — partitioned Parquet
 
-When `env_prefix` is explicitly set, **only** the matching prefixed env vars
-are consulted — there is no silent fallback to unprefixed vars. This prevents
-leaking credentials from a different environment.
+```python
+from nocoly_explorer import (
+    StreamingExporter, StreamingExportConfig, ParquetExportOptions,
+    PartitionSpec,
+)
 
-For Databricks, set the secret scope/key names in config and the package
-automatically switches to `DatabricksCredentialProvider` when
-`DATABRICKS_RUNTIME_VERSION` is detected.
+result = StreamingExporter(
+    client=client,                       # any object with .fetch_rows()
+    config=StreamingExportConfig(
+        output_dir="/mnt/datalake/nocoly/ws_123",
+        worksheet_id="ws_123",
+        options=ParquetExportOptions(
+            row_group_bytes=128 * 1024 * 1024,   # Databricks sweet spot
+            compression="snappy",
+            write_statistics=True,
+            on_schema_drift="ignore",            # or "error"
+            max_partition_cardinality=10_000,
+        ),
+        partition=PartitionSpec(column="created_date", granularity="day"),
+    ),
+).export()
 
-## Configuration File
-
-Create `nocoly.toml` or `nocoly.json` in your working directory or
-`~/.config/nocoly/`, or point at any path via the `NOCOLY_CONFIG` env var:
-
-```json
-{
-  "env_mode": "databricks",
-  "default_output_type": "spark",
-  "request_timeout_seconds": 60.0,
-  "max_retries": 5,
-  "databricks": {
-    "scope": "nocoly-prod",
-    "app_key_secret": "app_key",
-    "app_sign_secret": "app_sign"
-  },
-  "static_credentials": {
-    "env_prefix": "PROD"
-  }
-}
+print(result)
+# ExportResult(rows_written=487, partitions_written=2,
+#               files_written=2, output_dir='/mnt/datalake/nocoly/ws_123')
 ```
 
-Supported formats: `.json`, `.toml`. Other extensions raise a `ValueError`
-listing the supported formats. Results are cached per `NOCOLY_CONFIG` value
-within the same process.
+`StreamingExporter.export()` is synchronous and expects a sync `WorksheetClientLike`.
+To use it with `AsyncWorksheetClient`, fetch all rows first then hand them to a
+sync adapter (this is exactly what the service worker's `run_job` does):
 
-## Error Handling
+```python
+import asyncio
+from nocoly_explorer import (
+    AsyncWorksheetClient, StreamingExporter, StreamingExportConfig,
+    ParquetExportOptions, PartitionSpec,
+)
 
-All public failures bubble up as subclasses of `NocolyError`:
 
-| Exception                  | Cause                                                              |
-|----------------------------|--------------------------------------------------------------------|
-| `MissingCredentialsError`  | No source found for app_key/app_sign.                              |
-| `OutputValidationError`    | Bad output params (missing `file_path`, unsupported format, etc). |
-| `EnvironmentDetectionError`| `env_mode` is set to something other than `databricks` / `standard` / `None`. |
-| `NocolyError` (base)       | HTTP errors, invalid JSON, transport failures after retries.       |
+class _SyncRowsClient:
+    """Tiny adapter that hands a pre-fetched list to the sync exporter."""
+    def __init__(self, rows):
+        self._rows = list(rows)
+    def fetch_rows(self, **_kwargs):
+        return self._rows
 
-HTTP client retries transient errors up to `max_retries` times (default 3) with
-exponential backoff capped at `max_wait_seconds` (default 30s). When the server
-returns `429` or `503` with a `Retry-After` header, that header is honored.
 
-## Testing & Development
+async def export_async(host, token, worksheet_id, output_dir):
+    async with AsyncWorksheetClient(
+        base_url=host, auth_token=token, worksheet_id=worksheet_id,
+    ) as client:
+        all_rows = await client.fetch_all_async(page_size=200)
+    return StreamingExporter(
+        client=_SyncRowsClient(all_rows),
+        config=StreamingExportConfig(
+            output_dir=output_dir,
+            worksheet_id=worksheet_id,
+            options=ParquetExportOptions(),
+            partition=PartitionSpec(column="created_date", granularity="day"),
+        ),
+    ).export()
+```
+
+What you get:
+- **One Parquet file per partition** (Hive-style: `output_dir/created_date=YYYY-MM-DD/data_0.parquet`).
+- **Schema inference + drift handling** — types inferred from the first page, drift
+  policy `ignore` (drop new columns, fill missing with `null`) or `error`
+  (raise `SchemaDriftError`).
+- **Memory bounded** — `RowGroupBuffer` flushes by target byte size, not row count.
+- **Cardinality guard** — `CardinalityExceededError` if a partition column produces
+  more than `max_partition_cardinality` distinct values (default 10,000).
+- **Path-traversal safe** — partition values are stripped of `..`, `/`, and unsafe
+  characters before becoming directory names.
+
+End-to-end smoke: 25,000 rows × 5 regions × day-granularity → 5 valid Parquet
+files, ~1 MiB total, ~363 K rows/s on a Mac mini.
+
+### Composition with the v0.1.1 client
+
+```python
+from nocoly_explorer.client import NocolyClient
+from nocoly_explorer import StreamingExporter, StreamingExportConfig
+
+sync_client = NocolyClient(host=..., app_key=..., app_sign=...)
+StreamingExporter(
+    client=sync_client,                  # WorksheetClientLike Protocol
+    config=StreamingExportConfig(output_dir="...", worksheet_id="...", options=...),
+).export()
+```
+
+The exporter accepts any object with `.fetch_rows()` (the `WorksheetClientLike`
+Protocol) — sync or async, real or fake.
+
+---
+
+## Layer 3 — `create_app` + `run_job` (v0.2.0)
+
+A FastAPI service for orchestrating exports from n8n, Airflow, cron, or anything
+else that can `POST /jobs`. The service itself doesn't write data — it enqueues
+into Redis and an Arq worker pulls jobs and runs `StreamingExporter`.
+
+### Run the service
+
+```bash
+# 1. Start Redis
+docker run -d --name nocoly-redis -p 6379:6379 redis:7-alpine
+
+# 2. Start the API
+export NOCOLY_SERVICE_API_KEY="$(openssl rand -hex 32)"   # recommended
+uvicorn nocoly_explorer.service:app --host 127.0.0.1 --port 8080
+
+# 3. Start the worker (one or more)
+arq nocoly_explorer.service.worker.WorkerSettings
+```
+
+### Submit a job
+
+```bash
+curl -X POST http://localhost:8080/jobs \
+  -H "Authorization: Bearer $NOCOLY_SERVICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "host": "https://bpm-uat.chinachemgroup.com",
+    "worksheet_id": "ws_123",
+    "page_size": 200,
+    "max_pages": 1000,
+    "concurrency": 8,
+    "output": {
+      "sink": "parquet_local",
+      "path": "/mnt/datalake/nocoly/ws_123",
+      "partition_by": "created_date",
+      "partition_granularity": "day"
+    }
+  }'
+# {"job_id": "a1b2c3..."}
+```
+
+### Poll status
+
+```bash
+curl http://localhost:8080/jobs/a1b2c3... \
+  -H "Authorization: Bearer $NOCOLY_SERVICE_API_KEY"
+# {"job_id":"a1b2c3...","status":"running","progress_pct":42,
+#  "rows_fetched":12500,"started_at":"...","finished_at":null,"error":null}
+```
+
+### Endpoints
+
+| Method | Path                       | Body / Notes                                       |
+|--------|----------------------------|----------------------------------------------------|
+| `GET`  | `/healthz`                 | liveness (always 200)                              |
+| `GET`  | `/readyz`                  | 200 if Redis reachable, 503 otherwise              |
+| `POST` | `/jobs`                    | submit; returns `{"job_id": "..."}`                |
+| `GET`  | `/jobs/{id}`               | status + progress + rows_fetched                   |
+| `GET`  | `/jobs/{id}/result`        | artifact path; 409 if not yet succeeded            |
+| `POST` | `/jobs/{id}/cancel`        | cooperative cancellation at page boundary          |
+
+### API key auth
+
+If you set `api_key=...` on `create_app` (or set `NOCOLY_SERVICE_API_KEY` in
+the environment of your `uvicorn` process), every endpoint requires:
+
+```
+Authorization: Bearer <api_key>
+```
+
+If `api_key` is not set, **the service runs unauthenticated** — fine for local
+dev, never fine for production. Bind to 127.0.0.1 or front with a reverse proxy.
+
+### Direct API usage (skip the worker)
+
+```python
+from nocoly_explorer import create_app, run_job
+import fakeredis.aioredis
+
+app = create_app(
+    redis_url="redis://localhost:6379/0",
+    enqueue_func=arq_pool.enqueue_job,    # real in prod
+)
+
+# Or run a job synchronously in the same process:
+await run_job(redis=fakeredis.aioredis.FakeRedis(), job_id="abc", params={...})
+```
+
+---
+
+## Configuration
+
+### Environment variables
+
+The Nocoly API auth uses an `env_prefix` strategy. The default prefix is
+`NOCOLY`; you can override per-detector. Required variables:
+
+```bash
+export NOCOLY_APP_KEY="..."
+export NOCOLY_APP_SIGN="..."
+```
+
+Or, for multiple environments, use a prefix:
+
+```python
+from nocoly_explorer.auth import EnvCredentialProvider
+creds = EnvCredentialProvider(env_prefix="NOCOLY_UAT")
+# reads NOCOLY_UAT_APP_KEY, NOCOLY_UAT_APP_SIGN
+```
+
+On Databricks, the detector automatically switches to `DatabricksSecretProvider`
+unless you set `NOCOLY_DETECT_FORCE=local`.
+
+### Other env knobs
+
+| Variable                  | Effect                                                   |
+|---------------------------|----------------------------------------------------------|
+| `NOCOLY_DETECT_FORCE`     | `local` / `databricks` — override environment detection  |
+| `NOCOLY_SERVICE_API_KEY`  | Bearer token required on every service endpoint          |
+| `NOCOLY_REDIS_URL`        | Redis URL for service state (default `redis://localhost:6379/0`) |
+
+---
+
+## Development
 
 ```bash
 git clone https://github.com/rollroyces/nocoly-explorer.git
 cd nocoly-explorer
-pip install -e ".[dataframe]"
-pip install pytest pytest-cov
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dataframe,streaming,async,service,test]"
+
+# Run the full test suite (173 tests)
 pytest
+
+# Run only streaming tests
+pytest tests/test_streaming_exporter.py -v
+
+# Run only service tests
+pytest tests/test_service_app.py -v
+
+# Run the demo
+./scripts/demo.py
 ```
 
-Tests stub out external services (`requests`/`DBUtils`) to keep runs fast and
-hermetic. The test suite has 56 tests covering credential strategies, filter
-builder depth, output formatter edge cases, paging validation, backoff and
-`Retry-After` handling, environment detection, and config loading.
+### Project layout
 
-## Building & Publishing
-
-```bash
-# Build artifacts locally
-python -m build
-# → dist/nocoly_explorer-0.1.1-py3-none-any.whl
-# → dist/nocoly_explorer-0.1.1.tar.gz
-
-# Verify the wheel installs cleanly
-pip install dist/nocoly_explorer-0.1.1-py3-none-any.whl
-
-# Publish to an internal feed
-twine upload --repository corporate dist/*
+```
+src/nocoly_explorer/
+ ├── async_client.py          # Layer 2 — AsyncWorksheetClient, RetryPolicy, TokenBucket
+ ├── auth.py                  # CredentialProvider strategies
+ ├── client.py                # Layer 1 — sync client with retry / Retry-After
+ ├── config.py                # User config file loading
+ ├── detector.py              # Databricks vs. local detection
+ ├── exceptions.py            # All custom exceptions (centralized)
+ ├── exporter.py              # Layer 1 — WorksheetExporter orchestrator
+ ├── filters.py               # NocolyFilter DSL
+ ├── output.py                # Layer 1 — output formatters
+ ├── service/                 # Layer 3 — FastAPI service
+ │   ├── __init__.py          #   create_app
+ │   ├── auth.py              #   Bearer-token validator
+ │   ├── schemas.py           #   Pydantic models
+ │   ├── state.py             #   JobState (Redis)
+ │   └── worker.py            #   run_job (Arq)
+ └── streaming/               # Layer 2 — StreamingExporter
+     ├── buffer.py            #   RowGroupBuffer (target-bytes flushing)
+     ├── exporter.py          #   StreamingExporter + StreamingExportConfig
+     ├── options.py           #   ParquetExportOptions, PartitionSpec
+     ├── partitions.py        #   PartitionRouter + cardinality guard
+     ├── schema.py            #   ParquetSchemaManager + drift policy
+     └── writer.py            #   ParquetPartitionWriter (append mode)
 ```
 
-Downstream Databricks jobs and standard Python apps can then install with:
+---
 
-```bash
-pip install --index-url <internal-feed> nocoly-explorer
-```
+## Honest gaps
 
-## Continuous Integration
+This section lists what we have **not yet** verified end-to-end. Add them to your
+own integration checklist:
 
-GitHub Actions at [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on
-pushes/PRs to `main`/`master` across Python 3.10–3.12. Steps: checkout →
-set up Python (with pip cache) → install in editable mode with the `dataframe`
-extra → run `pytest` with coverage to catch regressions in credential
-providers, filters, client, output formatter, environment detection, and
-config loading.
+- **Real Nocoly endpoint with real credentials.** Everything end-to-end has been
+  validated against a local mock that matches the documented pagination shape.
+  Field names, auth headers, and error responses on the real server have not
+  been exercised here.
+- **S3 sink.** `parquet_s3` is declared in the schema but not wired in the worker.
+  Add your own `s3fs` / `pyarrow.fs.S3FileSystem` integration when you need it.
+- **Incremental sync.** Spec §6 (the Phase 4 `SyncStateStore` + `updated_at`
+  filtering) is not implemented. v0.2.1 will address it.
+- **Crash-restart safety for partial Parquet writes.** If the worker is killed
+  mid-write, the partition's `.parquet` file may be left half-formed. A `.tmp`
+  + rename pattern would fix this — see `ParquetPartitionWriter` for the seam.
+- **Multi-row-group per partition at scale.** Tested with single-digit row groups
+  per partition. Databricks recommendations (128 MB row groups) haven't been
+  load-tested at hundreds of MB per partition.
 
-## Changelog
+---
 
-### 0.1.1
+## License
 
-- **Fix:** README's documented filter expression (`and_group` of nested
-  `or_group` of `quick()` calls) is now constructible. Depth check now counts
-  groups only and the cap is 3.
-- **Fix:** `env_prefix` no longer silently falls back to unprefixed
-  credentials. Setting `env_prefix="PROD"` now strictly requires
-  `NOCOLY_PROD_APP_KEY` / `NOCOLY_PROD_APP_SIGN`.
-- **Fix:** Unknown `env_mode` values now raise `EnvironmentDetectionError`
-  instead of silently downgrading to `standard`.
-- **Fix:** CSV output handles rows with mismatched keys via union of all
-  keys (first-row order preserved). `None` and missing keys both render
-  consistently as empty fields.
-- **Fix:** JSON / string output serializes `datetime`, `Decimal`, `UUID`,
-  `bytes`, and `set` / `frozenset` values instead of crashing.
-- **Fix:** HTTP client honors `Retry-After` (delta-seconds and HTTP-date
-  formats) on 429/503 responses.
-- **Fix:** Exponential backoff capped at `max_wait_seconds` (default 30s);
-  no more unbounded retry waits.
-- **Fix:** `max_pages=0` raises `ValueError`. `page_size=0` and
-  `page_size > 1000` raise `ValueError` with actionable messages.
-- **Fix:** File output is atomic — writes to `<path>.tmp` then `os.replace()`
-  to avoid partial-write corruption. `parquet` export errors guide users to
-  install `pyarrow` or `fastparquet`.
-- **Fix:** Flat `{field: value}` dicts passed to `filter_criteria=` are
-  auto-converted to a condition group; DSL-shaped dicts pass through.
-- **Internal:** `load_package_config()` caches results per `NOCOLY_CONFIG`
-  value. Config loading gives clearer errors for unsupported extensions and
-  bad value types.
-- **Tests:** 56 tests across 6 test modules; full suite passes in <5 s.
-
-### 0.1.0
-
-- Initial release.
+Dual-licensed under MIT and Apache 2.0 at your option.
