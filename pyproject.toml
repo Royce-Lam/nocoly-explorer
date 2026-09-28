@@ -12,6 +12,7 @@ dependencies = [
 [project.optional-dependencies]
 dataframe = ["pandas>=2.0.0"]
 spark = ["pyspark>=3.4.0"]
+streaming = ["pyarrow>=14.0.0"]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]
