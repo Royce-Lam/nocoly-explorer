@@ -25,3 +25,11 @@ class SchemaDriftError(NocolyError):
 
 class CardinalityExceededError(NocolyError):
     """Raised when a partition column exceeds the configured max distinct values."""
+
+
+class AsyncClientError(NocolyError):
+    """Base exception for async pagination failures."""
+
+
+class PaginationLimitExceeded(AsyncClientError):
+    """Raised when pagination exceeds the configured max_pages."""
