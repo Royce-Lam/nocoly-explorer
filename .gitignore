@@ -59,4 +59,4 @@ coverage.xml
 *.pem
 *.key
 secrets.toml
-config.local.*
+config.local.*.superpowers/

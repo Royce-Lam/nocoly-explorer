@@ -17,7 +17,7 @@ from nocoly_explorer.streaming.options import (
     ParquetExportOptions,
     PartitionSpec,
 )
-from tests.streaming_fixtures import FakeClient, make_pages
+from streaming_fixtures import FakeClient, make_pages
 
 
 def _exporter(client, output_dir, **opt_kwargs):

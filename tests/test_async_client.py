@@ -112,7 +112,7 @@ async def test_token_bucket_rejects_invalid_burst():
 
 @pytest.fixture
 def server_pages():
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     return [
         [{"a": 1}, {"a": 2}],
         [{"a": 3}, {"a": 4}],
@@ -123,7 +123,7 @@ def server_pages():
 @pytest.mark.asyncio
 async def test_fetch_single_page_returns_rows(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages)
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -138,7 +138,7 @@ async def test_fetch_single_page_returns_rows(server_pages):
 @pytest.mark.asyncio
 async def test_fetch_single_page_retries_on_429(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient, RetryPolicy
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages, fail_first_n=2, retry_after="0")
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -154,7 +154,7 @@ async def test_fetch_single_page_retries_on_429(server_pages):
 @pytest.mark.asyncio
 async def test_fetch_single_page_raises_after_max_retries(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient, RetryPolicy, AsyncClientError
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages, fail_first_n=99)
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -170,7 +170,7 @@ async def test_fetch_single_page_raises_after_max_retries(server_pages):
 @pytest.mark.asyncio
 async def test_fetch_single_page_handles_5xx_with_backoff(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient, RetryPolicy
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages, fail_first_n=1, fail_status=503)
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -186,7 +186,7 @@ async def test_fetch_single_page_handles_5xx_with_backoff(server_pages):
 @pytest.mark.asyncio
 async def test_fetch_all_returns_all_rows_in_order(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages)
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -227,7 +227,7 @@ async def test_fetch_all_preserves_order_when_pages_complete_out_of_order():
 @pytest.mark.asyncio
 async def test_fetch_all_stops_on_short_page():
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[{"a": 1}], [{"a": 2}], [{"a": 3}]])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -242,7 +242,7 @@ async def test_fetch_all_stops_on_short_page():
 @pytest.mark.asyncio
 async def test_fetch_all_handles_empty_result():
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[]])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -258,7 +258,7 @@ async def test_fetch_all_handles_empty_result():
 async def test_fetch_all_raises_when_max_pages_exceeded_without_terminator():
     """Stops at max_pages even if server has more; raises PaginationLimitExceeded."""
     from nocoly_explorer.async_client import AsyncWorksheetClient, PaginationLimitExceeded
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[{"a": i}] for i in range(100)])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -273,7 +273,7 @@ async def test_fetch_all_raises_when_max_pages_exceeded_without_terminator():
 @pytest.mark.asyncio
 async def test_fetch_all_raises_pagination_limit_when_max_pages_exceeded():
     from nocoly_explorer.async_client import AsyncWorksheetClient, PaginationLimitExceeded
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[{"a": i}] for i in range(20)])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -289,7 +289,7 @@ async def test_fetch_all_raises_pagination_limit_when_max_pages_exceeded():
 @pytest.mark.asyncio
 async def test_fetch_pages_async_yields_pages_in_order(server_pages):
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler(server_pages)
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -306,7 +306,7 @@ async def test_fetch_pages_async_yields_pages_in_order(server_pages):
 @pytest.mark.asyncio
 async def test_fetch_pages_async_handles_empty_result():
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[]])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)
@@ -323,7 +323,7 @@ async def test_fetch_pages_async_handles_empty_result():
 @pytest.mark.asyncio
 async def test_fetch_all_cancellation_cancels_inflight_tasks():
     from nocoly_explorer.async_client import AsyncWorksheetClient
-    from tests.async_fixtures import make_handler
+    from async_fixtures import make_handler
     handler = make_handler([[{"a": i}] for i in range(5)])
     app = web.Application()
     app.router.add_get("/worksheets/ws/rows", handler)

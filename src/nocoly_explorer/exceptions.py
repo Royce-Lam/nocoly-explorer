@@ -33,3 +33,15 @@ class AsyncClientError(NocolyError):
 
 class PaginationLimitExceeded(AsyncClientError):
     """Raised when pagination exceeds the configured max_pages."""
+
+
+class ServiceError(NocolyError):
+    """Base exception for service-layer failures."""
+
+
+class JobNotFound(ServiceError):
+    """Raised when a job_id does not exist in Redis."""
+
+
+class JobNotReady(ServiceError):
+    """Raised when /result is fetched before job completion."""
