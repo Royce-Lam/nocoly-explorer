@@ -29,7 +29,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e .[dataframe]
+          pip install -e .[dataframe,streaming,async,service,test]
           pip install pytest pytest-cov
 
       - name: Run tests with coverage
