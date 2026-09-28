@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Literal, Optional, Union
+
+from ..exceptions import OutputValidationError
 
 _VALID_GRANULARITIES = ("day", "month", "year")
 _VALID_DRIFT_POLICIES = ("ignore", "error")
 _VALID_COMPRESSIONS = ("snappy", "gzip", "zstd", "lz4", "brotli", None)
+
+_PARTITION_KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]+=[A-Za-z0-9_.\-]+$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,3 +62,35 @@ class ParquetExportOptions:
                 f"compression must be one of {_VALID_COMPRESSIONS}; "
                 f"got {self.compression!r}"
             )
+
+
+def validate_output_dir(path: Union[str, Path]) -> Path:
+    """Validate and create the output directory. Rejects files and .parquet paths."""
+    p = Path(path)
+    if p.suffix.lower() == ".parquet":
+        raise OutputValidationError(
+            f"output_dir must be a directory, not a Parquet file path. Got {p!s}"
+        )
+    if p.exists() and not p.is_dir():
+        raise OutputValidationError(
+            f"output_dir must be a directory; {p!s} exists and is a file."
+        )
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def resolve_partition_path(output_dir: Path, partition_key: str) -> Path:
+    """Resolve a Hive-style partition key to a directory under output_dir.
+
+    Partition keys look like 'created_date=2026-09-28'. Path traversal and
+    absolute paths are rejected to keep the export sandboxed.
+    """
+    if not _PARTITION_KEY_RE.match(partition_key):
+        raise ValueError(
+            f"Invalid partition key {partition_key!r}; expected 'column=value' with safe characters."
+        )
+    partition_path = (output_dir / partition_key).resolve()
+    output_resolved = output_dir.resolve()
+    if not str(partition_path).startswith(str(output_resolved) + "/"):
+        raise ValueError(f"Partition key {partition_key!r} escapes output_dir")
+    return partition_path

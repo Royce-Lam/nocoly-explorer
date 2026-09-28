@@ -61,3 +61,55 @@ def test_schema_drift_and_cardinality_inherit_from_nocoly_error():
     from nocoly_explorer.exceptions import SchemaDriftError, CardinalityExceededError
     assert issubclass(SchemaDriftError, NocolyError)
     assert issubclass(CardinalityExceededError, NocolyError)
+
+
+def test_validate_output_dir_creates_directory(tmp_path):
+    target = tmp_path / "exports" / "deep" / "path"
+    from nocoly_explorer.streaming.options import validate_output_dir
+    result = validate_output_dir(target)
+    assert result.exists()
+    assert result.is_dir()
+
+
+def test_validate_output_dir_rejects_existing_file(tmp_path):
+    existing_file = tmp_path / "not-a-dir.txt"
+    existing_file.write_text("")
+    from nocoly_explorer.streaming.options import validate_output_dir
+    from nocoly_explorer.exceptions import OutputValidationError
+    with pytest.raises(OutputValidationError):
+        validate_output_dir(existing_file)
+
+
+def test_validate_output_dir_rejects_parquet_extension(tmp_path):
+    target = tmp_path / "data.parquet"
+    from nocoly_explorer.streaming.options import validate_output_dir
+    from nocoly_explorer.exceptions import OutputValidationError
+    with pytest.raises(OutputValidationError) as excinfo:
+        validate_output_dir(target)
+    assert ".parquet" in str(excinfo.value).lower()
+
+
+def test_validate_output_dir_accepts_existing_empty_dir(tmp_path):
+    target = tmp_path / "existing-empty"
+    target.mkdir()
+    from nocoly_explorer.streaming.options import validate_output_dir
+    result = validate_output_dir(target)
+    assert result == target
+
+
+def test_resolve_partition_path_returns_hive_style():
+    from nocoly_explorer.streaming.options import resolve_partition_path
+    out = resolve_partition_path(__import__("pathlib").Path("/data"), "created_date=2026-09-28")
+    assert out == __import__("pathlib").Path("/data/created_date=2026-09-28")
+
+
+def test_resolve_partition_path_rejects_path_traversal():
+    from nocoly_explorer.streaming.options import resolve_partition_path
+    with pytest.raises(ValueError):
+        resolve_partition_path(__import__("pathlib").Path("/data"), "../../etc/passwd")
+
+
+def test_resolve_partition_path_rejects_absolute_keys():
+    from nocoly_explorer.streaming.options import resolve_partition_path
+    with pytest.raises(ValueError):
+        resolve_partition_path(__import__("pathlib").Path("/data"), "/etc/passwd")
