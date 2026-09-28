@@ -1,0 +1,1 @@
+"""Streaming Parquet export for Nocoly worksheet data."""

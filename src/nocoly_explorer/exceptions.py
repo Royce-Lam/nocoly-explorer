@@ -17,3 +17,11 @@ class OutputValidationError(NocolyError):
 
 class EnvironmentDetectionError(NocolyError):
     """Raised when the runtime mode cannot be determined."""
+
+
+class SchemaDriftError(NocolyError):
+    """Raised when the API response schema diverges from the declared one."""
+
+
+class CardinalityExceededError(NocolyError):
+    """Raised when a partition column exceeds the configured max distinct values."""
