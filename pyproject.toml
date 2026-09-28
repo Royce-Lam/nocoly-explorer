@@ -1,6 +1,6 @@
 [project]
 name = "nocoly-explorer"
-version = "0.1.1"
+version = "0.2.0rc1"
 description = "Modular worksheet downloader/exporter for Nocoly datasets"
 readme = "README.md"
 authors = [{name = "Chinachem Data Platform"}]
