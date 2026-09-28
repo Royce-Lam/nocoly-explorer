@@ -1,0 +1,24 @@
+[project]
+name = "nocoly-explorer"
+version = "0.1.1"
+description = "Modular worksheet downloader/exporter for Nocoly datasets"
+readme = "README.md"
+authors = [{name = "Chinachem Data Platform"}]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32.0",
+]
+
+[project.optional-dependencies]
+dataframe = ["pandas>=2.0.0"]
+spark = ["pyspark>=3.4.0"]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
