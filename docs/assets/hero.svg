@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="layer1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3fb950"/>
+      <stop offset="100%" stop-color="#2ea043"/>
+    </linearGradient>
+    <linearGradient id="layer2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="100%" stop-color="#1f6feb"/>
+    </linearGradient>
+    <linearGradient id="layer3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bc8cff"/>
+      <stop offset="100%" stop-color="#8957e5"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+
+  <rect width="1200" height="320" fill="url(#bg)" rx="12"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.04" stroke="#58a6ff" stroke-width="0.5">
+    <line x1="0" y1="80" x2="1200" y2="80"/>
+    <line x1="0" y1="160" x2="1200" y2="160"/>
+    <line x1="0" y1="240" x2="1200" y2="240"/>
+    <line x1="200" y1="0" x2="200" y2="320"/>
+    <line x1="400" y1="0" x2="400" y2="320"/>
+    <line x1="600" y1="0" x2="600" y2="320"/>
+    <line x1="800" y1="0" x2="800" y2="320"/>
+    <line x1="1000" y1="0" x2="1000" y2="320"/>
+  </g>
+
+  <!-- Title block -->
+  <g transform="translate(60, 70)">
+    <text font-size="48" font-weight="700" fill="#e6edf3" letter-spacing="-1.5">nocoly-explorer</text>
+    <text y="40" font-size="20" font-weight="400" fill="#7d8590" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">v0.2.0 · enterprise data pipeline · 3 layers · 173 tests</text>
+
+    <!-- Tagline / one-liner -->
+    <text y="84" font-size="14" fill="#545d68">fetch → stream → serve</text>
+  </g>
+
+  <!-- Three layer badges (right side) -->
+  <g transform="translate(60, 200)">
+    <!-- Layer 1: WorksheetExporter -->
+    <g transform="translate(0, 0)">
+      <rect width="346" height="76" rx="10" fill="#161b22" stroke="#30363d"/>
+      <rect width="4" height="76" rx="2" fill="url(#layer1)"/>
+      <text x="20" y="26" font-size="11" font-weight="600" fill="#3fb950" letter-spacing="1.2">LAYER 1</text>
+      <text x="20" y="48" font-size="17" font-weight="600" fill="#e6edf3">WorksheetExporter</text>
+      <text x="20" y="66" font-size="12" fill="#7d8590">pandas · spark · csv · json · file</text>
+    </g>
+
+    <!-- Arrow -->
+    <g transform="translate(346, 26)" stroke="#30363d" stroke-width="2" fill="#30363d">
+      <path d="M 6 12 L 16 12 M 12 8 L 16 12 L 12 16"/>
+    </g>
+
+    <!-- Layer 2 -->
+    <g transform="translate(376, 0)">
+      <rect width="346" height="76" rx="10" fill="#161b22" stroke="#30363d"/>
+      <rect width="4" height="76" rx="2" fill="url(#layer2)"/>
+      <text x="20" y="26" font-size="11" font-weight="600" fill="#58a6ff" letter-spacing="1.2">LAYER 2</text>
+      <text x="20" y="48" font-size="17" font-weight="600" fill="#e6edf3">Streaming · Async</text>
+      <text x="20" y="66" font-size="12" fill="#7d8590">concurrent pagination · partitioned Parquet</text>
+    </g>
+
+    <!-- Arrow -->
+    <g transform="translate(722, 26)" stroke="#30363d" stroke-width="2" fill="#30363d">
+      <path d="M 6 12 L 16 12 M 12 8 L 16 12 L 12 16"/>
+    </g>
+
+    <!-- Layer 3 -->
+    <g transform="translate(752, 0)">
+      <rect width="346" height="76" rx="10" fill="#161b22" stroke="#30363d"/>
+      <rect width="4" height="76" rx="2" fill="url(#layer3)"/>
+      <text x="20" y="26" font-size="11" font-weight="600" fill="#bc8cff" letter-spacing="1.2">LAYER 3</text>
+      <text x="20" y="48" font-size="17" font-weight="600" fill="#e6edf3">FastAPI · Arq</text>
+      <text x="20" y="66" font-size="12" fill="#7d8590">jobs · status · cancel · result</text>
+    </g>
+  </g>
+
+</svg>

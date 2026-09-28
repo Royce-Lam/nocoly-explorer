@@ -1,29 +1,80 @@
-# Nocoly Explorer
+<div align="center">
 
-A modular Python client for downloading [Nocoly](https://www.nocoly.com) worksheet data,
-from one-shot scripts to enterprise data pipelines. Three layers stacked on the same
-core client:
+<img src="docs/assets/hero.svg" alt="nocoly-explorer" width="100%">
 
-- **`WorksheetExporter`** — fetch into pandas / PySpark / CSV / JSON / files (v0.1.1)
-- **`StreamingExporter` + `AsyncWorksheetClient`** — paginate concurrently, write
-  partitioned Parquet, hold memory bounded by row-group size (v0.2.0)
-- **`create_app` + `run_job`** — FastAPI service + Arq worker for orchestration
-  from n8n / Airflow / schedulers (v0.2.0)
+</div>
+
+<br>
+
+<div align="center">
 
 [![Tests](https://img.shields.io/badge/tests-173%20passed-brightgreen)]()
-[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)]()
+[![Python](https://img.shields.io/badge/python-3.10–3.12-blue)]()
 [![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/rollroyces/nocoly-explorer/releases/tag/v0.2.0)
+[![Wheel](https://img.shields.io/badge/wheel-39_KB-blue)](https://github.com/rollroyces/nocoly-explorer/releases/download/v0.2.0/nocoly_explorer-0.2.0-py3-none-any.whl)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache%202.0-lightgrey)]()
+
+</div>
+
+A modular Python client for downloading [Nocoly](https://www.nocoly.com) worksheet
+data — from one-shot scripts to enterprise data pipelines. Three layers stacked on
+the same core client:
+
+- 🟢 **`WorksheetExporter`** — fetch into pandas / PySpark / CSV / JSON / files (v0.1.1)
+- 🔵 **`StreamingExporter` + `AsyncWorksheetClient`** — paginate concurrently, write
+  partitioned Parquet, hold memory bounded by row-group size (v0.2.0)
+- 🟣 **`create_app` + `run_job`** — FastAPI service + Arq worker for orchestration
+  from n8n / Airflow / schedulers (v0.2.0)
 
 ---
 
-## Demo
+## What you get
 
-![nocoly-explorer v0.2.0 demo](docs/assets/demo.gif)
+Real artifacts from a 487-row end-to-end run against a **local mock Nocoly server**
+(visible in the live demo below):
 
-The demo runs against a **local mock Nocoly server**, not your real production
-endpoint — that's intentional. It exercises the wiring of the three layers
-end-to-end: imports, FastAPI service start, mock data source, job submission,
-status polling, result endpoint, cancellation, and 404 handling. Run it yourself:
+<div align="center">
+
+<img src="docs/assets/output.png" alt="output — partition tree, JSON status, PyArrow schema, pandas rows" width="100%">
+
+</div>
+
+<details>
+<summary><b>What's in this screenshot</b></summary>
+
+<br>
+
+- **Top-left** — Hive-style partition tree: `region=HK/data_0.parquet` (243 rows) and `region=SZ/data_0.parquet` (244 rows), 5.9 KB each.
+- **Top-right** — `GET /jobs/{id}/result` response: `status=succeeded`, `progress_pct=100.0`, `rows_fetched=487`, `artifact_path=/tmp/nocoly-real`.
+- **Middle** — `pyarrow.parquet.read_table().schema`: `int64`, `string`, `double`, `bool`, `list<string>` — types inferred automatically from the first page, no schema file required.
+- **Bottom** — `pandas.read_parquet().head(3)` showing actual row contents.
+
+All four panels are real outputs from the demo at `scripts/demo.py` — not staged.
+</details>
+
+---
+
+## How a job flows
+
+<div align="center">
+
+<img src="docs/assets/architecture.png" alt="architecture diagram — caller, FastAPI, Redis, Arq worker, Nocoly, Parquet" width="100%">
+
+</div>
+
+One HTTP request → enqueued in Redis → Arq worker fetches async via
+`AsyncWorksheetClient` → writes sync via `StreamingExporter` → Parquet on disk.
+Status and progress flow back to Redis so the API stays responsive. A `cancel`
+request flips a flag the worker checks between pages — cooperative cancellation,
+no orphaned half-written files.
+
+---
+
+## Live demo
+
+`scripts/demo.py` boots a mock Nocoly server and walks through the API
+end-to-end against it. Honest label: this is a wiring test, not a real
+Nocoly run.
 
 ```bash
 git clone https://github.com/rollroyces/nocoly-explorer.git
@@ -32,8 +83,16 @@ pip install -e ".[service,streaming,async,test]"
 ./scripts/demo.py
 ```
 
-The cast file at `docs/assets/demo.cast` and the driver at `scripts/demo.py` are
-checked in so the demo is reproducible.
+Or play back the recorded terminal session:
+
+```bash
+# if you have asciinema installed
+asciinema play docs/assets/demo.cast
+```
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="terminal demo" width="800">
+</p>
 
 ---
 
@@ -316,21 +375,6 @@ Authorization: Bearer <api_key>
 
 If `api_key` is not set, **the service runs unauthenticated** — fine for local
 dev, never fine for production. Bind to 127.0.0.1 or front with a reverse proxy.
-
-### Direct API usage (skip the worker)
-
-```python
-from nocoly_explorer import create_app, run_job
-import fakeredis.aioredis
-
-app = create_app(
-    redis_url="redis://localhost:6379/0",
-    enqueue_func=arq_pool.enqueue_job,    # real in prod
-)
-
-# Or run a job synchronously in the same process:
-await run_job(redis=fakeredis.aioredis.FakeRedis(), job_id="abc", params={...})
-```
 
 ---
 
