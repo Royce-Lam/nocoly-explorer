@@ -24,8 +24,8 @@ class PartitionSpec:
     granularity: Optional[Literal["day", "month", "year"]] = None
 
     def __post_init__(self) -> None:
-        if not self.column:
-            raise ValueError("PartitionSpec.column must be a non-empty string")
+        # column may be empty for "placeholder" specs that aren't actively used
+        # (e.g. when StreamingExporter constructs a Router for the no-partition case).
         if self.granularity is not None and self.granularity not in _VALID_GRANULARITIES:
             raise ValueError(
                 f"PartitionSpec.granularity must be one of {_VALID_GRANULARITIES} or None; "

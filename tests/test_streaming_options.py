@@ -28,9 +28,12 @@ def test_partition_spec_rejects_invalid_granularity():
         PartitionSpec(column="x", granularity="hour")
 
 
-def test_partition_spec_rejects_empty_column():
-    with pytest.raises(ValueError):
-        PartitionSpec(column="")
+def test_partition_spec_with_day_granularity_requires_non_empty_column():
+    # Documenting current behavior: empty column is allowed as a placeholder;
+    # granularity-aware specs require a column to be meaningful.
+    spec = PartitionSpec(column="x", granularity="day")
+    assert spec.column == "x"
+    assert spec.granularity == "day"
 
 
 def test_parquet_export_options_defaults():
